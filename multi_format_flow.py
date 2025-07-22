@@ -94,8 +94,8 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
             self.event_logger.emit_event(
                 event_type="task_started",
                 data={
-                    "goal": "다중 형식 분석을 위한 양식 유형을 분석하고 콘텐츠 생성 실행 계획을 작성",
-                    "name": "다중 형식 분석가",
+                    "goal": "다양한 폼 양식 유형을 분석하고 콘텐츠 생성 실행 계획을 작성합니다.",
+                    "name": "OpenAI Deep Research",
                     "role": "다중 형식 분석을 통해 콘텐츠 생성 실행 계획을 작성하는 에이전트",
                     "agent_profile": "/images/chat-icon.png"
                 },
@@ -148,6 +148,10 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
     @listen("create_execution_plan")
     async def generate_reports(self) -> Dict[str, str]:
         """실행 계획에 따라 리포트들을 생성"""
+        # 리포트 생성 계획이 없으면 스킵
+        if not (self.state.execution_plan and self.state.execution_plan.report_phase.forms):
+            print("⚠️ 리포트 생성 계획이 없어 스킵합니다.")
+            return {}
         try:
             for report_form in self.state.execution_plan.report_phase.forms:
                 report_key = report_form.get('key', 'report')
@@ -165,15 +169,6 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                 # 섹션 병합
                 await self._merge_report_sections(report_key, sections)
                 
-            # 모든 리포트 생성 완료 후 final_result 형태로 이벤트 발행
-            self.event_logger.emit_event(
-                event_type="task_completed",
-                data={"final_result": self.state.report_contents},
-                job_id="api-deep-research_report_generation",
-                crew_type="report",
-                todo_id=self.state.todo_id,
-                proc_inst_id=self.state.proc_inst_id
-            )
             return self.state.report_contents
         except Exception as e:
             self._handle_error("리포트생성", e)
@@ -184,12 +179,12 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
             self.event_logger.emit_event(
                 event_type="task_started",
                 data={
-                    "goal": "컨텍스트를 분석하여, 현재 상황에 맞는 목차(TOC)를 생성",
-                    "name": "TOC 생성가",
+                    "goal": "컨텍스트를 분석하여, 현재 상황에 맞는 목차(TOC)를 생성합니다.",
+                    "name": "OpenAI Deep Research",
                     "role": "컨텍스트를 분석하여, 현재 상황에 맞는 목차(TOC)를 생성하는 에이전트",
                     "agent_profile": "/images/chat-icon.png"
                 },
-                job_id="api-deep-research_planning_sections",
+                job_id=f"api-deep-research_planning_sections_{report_key}",
                 crew_type="planning",
                 todo_id=self.state.todo_id,
                 proc_inst_id=self.state.proc_inst_id
@@ -210,7 +205,7 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                 data={
                     "final_result": cleaned_text
                 },
-                job_id="api-deep-research_planning_sections",
+                job_id=f"api-deep-research_planning_sections_{report_key}",
                 crew_type="planning",
                 todo_id=self.state.todo_id,
                 proc_inst_id=self.state.proc_inst_id
@@ -225,6 +220,8 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
         """섹션별 내용을 병렬로 생성하고 완료 순서대로 처리"""
         # 섹션별 비동기 작업 생성
         tasks = []
+        task_job_map = {}
+        section_map = {}
         for sec in sections:
             section_title = sec.get('title', 'unknown')
             
@@ -236,11 +233,11 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                 event_type="task_started",
                 data={
                     "goal": f"{section_title} 섹션의 내용을 생성하기 위해 리서치를 진행합니다.",
-                    "name": f"{section_title} 섹션 생성 전문가",
+                    "name": "OpenAI Deep Research",
                     "role": "리서치를 진행하여 섹션의 내용을 생성하는 에이전트",
                     "agent_profile": "/images/chat-icon.png"
                 },
-                job_id=f"api_{section_job_id}",
+                job_id=f"api_{section_job_id}_{report_key}",
                 crew_type="report",
                 todo_id=self.state.todo_id,
                 proc_inst_id=self.state.proc_inst_id
@@ -254,13 +251,14 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                     event_logger=self.event_logger,
                     todo_id=self.state.todo_id,
                     proc_inst_id=self.state.proc_inst_id,
-                    job_id=section_job_id
+                    job_id=f"api_{section_job_id}_{report_key}"
                 )
             )
             tasks.append(task)
+            task_job_map[task] = section_job_id
+            section_map[task] = sec
         
         # 완료 순서대로 처리
-        section_map = {task: section for task, section in zip(tasks, sections)}
         pending_tasks = set(tasks)
         
         while pending_tasks:
@@ -281,7 +279,7 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                     self.event_logger.emit_event(
                         event_type="task_completed",
                         data={"final_result": {report_key: content}},
-                        job_id=f"api_{section_job_id}",
+                        job_id=f"api_{task_job_map[task]}_{report_key}",
                         crew_type="report",
                         todo_id=self.state.todo_id,
                         proc_inst_id=self.state.proc_inst_id
@@ -300,12 +298,12 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
         self.event_logger.emit_event(
             event_type="task_started",
             data={
-                "goal": "리포트의 섹션들을 TOC 순서대로 병합",
-                "name": "리포트 병합 전문가",
+                "goal": "리포트의 섹션들을 순서대로 병합하여, 최종 리포트를 생성합니다.",
+                "name": "OpenAI Deep Research",
                 "role": "병합된 섹션들을 TOC 순서대로 병합하는 에이전트",
                 "agent_profile": "/images/chat-icon.png"
             },
-            job_id=f"api-deep-research_report_merge_{report_key}",
+            job_id=f"api-deep-research_final_report_merge_{report_key}",
             crew_type="report",
             todo_id=self.state.todo_id,
             proc_inst_id=self.state.proc_inst_id
@@ -330,7 +328,7 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
             data={
                 "final_result": {report_key: merged_content}
             },
-            job_id=f"api-deep-research_report_merge_{report_key}",
+            job_id=f"api-deep-research_final_report_merge_{report_key}",
             crew_type="report",
             todo_id=self.state.todo_id,
             proc_inst_id=self.state.proc_inst_id
@@ -361,21 +359,12 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
     @listen("generate_reports")
     async def generate_slides(self) -> Dict[str, str]:
         """리포트를 기반으로 슬라이드들을 생성"""
+        # 슬라이드 생성 계획이 없으면 스킵
+        if not (self.state.execution_plan and self.state.execution_plan.slide_phase.forms):
+            print("⚠️ 슬라이드 생성 계획이 없어 스킵합니다.")
+            return {}
         try:
-            # 슬라이드 생성 시작 이벤트
-            self.event_logger.emit_event(
-                event_type="task_started",
-                data={
-                    "goal": "리포트를 기반으로 슬라이드들을 생성",
-                    "name": "슬라이드 생성 전문가",
-                    "role": "리포트를 기반으로 슬라이드들을 생성하는 에이전트",
-                    "agent_profile": "/images/chat-icon.png"
-                },
-                job_id="api-deep-research_generate_slides",
-                crew_type="slide",
-                todo_id=self.state.todo_id,
-                proc_inst_id=self.state.proc_inst_id
-            )
+            print("▶️ 슬라이드 생성 시작")
             
             # 리포트 기반 슬라이드 생성
             if self.state.report_contents:
@@ -385,18 +374,8 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                 # 이전 컨텍스트 기반 슬라이드 생성
                 await self._create_slides_from_context()
             
-            # 슬라이드 생성 완료 이벤트
-            self.event_logger.emit_event(
-                event_type="task_completed",
-                data={
-                    "final_result": self.state.slide_contents
-                },
-                job_id="api-deep-research_generate_slides",
-                crew_type="slide",
-                todo_id=self.state.todo_id,
-                proc_inst_id=self.state.proc_inst_id
-            )
-                
+            
+            print("✅ 슬라이드 생성 완료")
             return self.state.slide_contents
             
         except Exception as e:
@@ -411,10 +390,35 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
             if report_key in slide_form.get('dependencies', []):
                 slide_key = slide_form['key']
                 
-                self.state.slide_contents[slide_key] = generate_slide_from_report(
+                # 슬라이드 시작 이벤트
+                self.event_logger.emit_event(
+                    event_type="task_started",
+                    data={
+                        "goal": f"리포트 내용을 기반으로 슬라이드를 생성합니다.",
+                        "name": "OpenAI Deep Research",
+                        "role": "리포트 내용을 기반으로 슬라이드를 생성하는 에이전트",
+                        "agent_profile": "/images/chat-icon.png"
+                    },
+                    job_id=f"api-deep-research_generate_slides_{slide_key}",
+                    crew_type="slide",
+                    todo_id=self.state.todo_id,
+                    proc_inst_id=self.state.proc_inst_id
+                )
+                # 슬라이드 생성
+                slide_content = generate_slide_from_report(
                     content, self.state.user_info, api_key
                 )
+                self.state.slide_contents[slide_key] = slide_content
                 print(f"🎯 [{slide_key}] 슬라이드 생성 완료 (from {report_key})")
+                # 슬라이드 완료 이벤트
+                self.event_logger.emit_event(
+                    event_type="task_completed",
+                    data={"final_result": {slide_key: slide_content}},
+                    job_id=f"api-deep-research_generate_slides_{slide_key}",
+                    crew_type="slide",
+                    todo_id=self.state.todo_id,
+                    proc_inst_id=self.state.proc_inst_id
+                )
 
     async def _create_slides_from_context(self) -> None:
         """이전 컨텍스트를 기반으로 슬라이드 생성"""
@@ -422,11 +426,35 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
         
         for slide_form in self.state.execution_plan.slide_phase.forms:
             slide_key = slide_form['key']
-            
-            self.state.slide_contents[slide_key] = generate_slide_from_report(
+            # 슬라이드 시작 이벤트 (context)
+            self.event_logger.emit_event(
+                event_type="task_started",
+                data={
+                    "goal": "컨텍스트를 기반으로 슬라이드를 생성합니다.",
+                    "name": "OpenAI Deep Research",
+                    "role": "컨텍스트를 기반으로 슬라이드를 생성하는 에이전트",
+                    "agent_profile": "/images/chat-icon.png"
+                },
+                job_id=f"api-deep-research_generate_slides_{slide_key}",
+                crew_type="slide",
+                todo_id=self.state.todo_id,
+                proc_inst_id=self.state.proc_inst_id
+            )
+            # 슬라이드 생성
+            slide_content = generate_slide_from_report(
                 self.state.previous_context, self.state.user_info, api_key
             )
+            self.state.slide_contents[slide_key] = slide_content
             print(f"🎯 [{slide_key}] 슬라이드 생성 완료 (from context)")
+            # 슬라이드 완료 이벤트 (context)
+            self.event_logger.emit_event(
+                event_type="task_completed",
+                data={"final_result": {slide_key: slide_content}},
+                job_id=f"api-deep-research_generate_slides_{slide_key}",
+                crew_type="slide",
+                todo_id=self.state.todo_id,
+                proc_inst_id=self.state.proc_inst_id
+            )
 
     # ========================================================================
     # 4단계: 텍스트 생성
@@ -435,14 +463,19 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
     @listen("generate_slides")
     async def generate_texts(self) -> Dict[str, Any]:
         """리포트를 기반으로 텍스트 폼들을 생성"""
+        # 텍스트 생성 계획이 없으면 스킵
+        if not (self.state.execution_plan and self.state.execution_plan.text_phase.forms):
+            print("⚠️ 텍스트 생성 계획이 없어 스킵합니다.")
+            return {}
         try:
+            print("▶️ 텍스트 생성 시작")
             # 텍스트 생성 시작 이벤트
             self.event_logger.emit_event(
                 event_type="task_started",
                 data={
-                    "goal": "리포트를 기반으로 텍스트 폼들을 생성",
-                    "name": "텍스트 생성 전문가",
-                    "role": "리포트를 기반으로 텍스트 폼들을 생성하는 에이전트",
+                    "goal": "컨텍스트 텍스트 폼을 생성합니다.",
+                    "name": "OpenAI Deep Research",
+                    "role": "리포트를 기반으로 텍스트 폼을 생성하는 에이전트",
                     "agent_profile": "/images/chat-icon.png"
                 },
                 job_id="api-deep-research_generate_texts",
@@ -470,7 +503,8 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                 todo_id=self.state.todo_id,
                 proc_inst_id=self.state.proc_inst_id
             )
-                
+            
+            print("✅ 텍스트 생성 완료")
             return self.state.text_contents
             
         except Exception as e:
@@ -544,7 +578,7 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
             print("="*60)
             
             # 최종 결과 DB 저장
-            if self.state.todo_id and self.state.proc_inst_id:
+            if self.state.todo_id and self.state.proc_form_id:
                 all_results = {
                     **self.state.report_contents,
                     **self.state.slide_contents,
@@ -552,7 +586,7 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                 }
                 
                 if all_results:
-                    final_result = {self.state.proc_inst_id: all_results}
+                    final_result = {self.state.proc_form_id: all_results}
                     await save_task_result(self.state.todo_id, final_result, final=True)
                     
                     # 처리 결과 출력
@@ -560,16 +594,6 @@ class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
                     slide_count = len(self.state.slide_contents)
                     text_count = len(self.state.text_contents)
                     print(f"📊 처리 결과: 리포트 {report_count}개, 슬라이드 {slide_count}개, 텍스트 {text_count}개")
-            
-            # 최종 완료 이벤트
-            self.event_logger.emit_event(
-                event_type="crew_completed",
-                data={},
-                job_id="CREW_FINISHED",
-                crew_type="crew",
-                todo_id=self.state.todo_id,
-                proc_inst_id=self.state.proc_inst_id
-            )
             
         except Exception as e:
             self._handle_error("최종결과저장", e) 

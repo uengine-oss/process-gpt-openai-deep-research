@@ -176,7 +176,7 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
                 event_logger.emit_event(
                     event_type="tool_usage_started",
                     data={"tool_name": tool_name},
-                    job_id=f"api_{job_id}",
+                    job_id=job_id,
                     crew_type="report",
                     todo_id=todo_id,
                     proc_inst_id=proc_inst_id
@@ -220,7 +220,7 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
                             "tool_name": tool_name,
                             "info":      info
                         },
-                        job_id=f"api_{job_id}",
+                        job_id=job_id,
                         crew_type="report",
                         todo_id=todo_id,
                         proc_inst_id=proc_inst_id

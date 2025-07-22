@@ -3,7 +3,6 @@ import json
 import asyncio
 import socket
 import traceback
-from contextvars import ContextVar
 from typing import Optional, List, Dict, Any, Tuple
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -12,11 +11,16 @@ from supabase import create_client, Client
 # 설정 및 초기화  
 # ============================================================================  
 
-supabase_client_var = ContextVar('supabase', default=None)
+_supabase_client: Optional[Client] = None
 
 def initialize_db():
     """환경변수 로드 및 Supabase 클라이언트 초기화"""
     try:
+        global _supabase_client
+        # 이미 초기화된 경우 스킵
+        if _supabase_client is not None:
+            return
+        
         if os.getenv("ENV") != "production":
             load_dotenv()
 
@@ -24,13 +28,19 @@ def initialize_db():
         supabase_key = os.getenv("SUPABASE_KEY")
         if not supabase_url or not supabase_key:
             raise RuntimeError("SUPABASE_URL 및 SUPABASE_KEY를 .env에 설정하세요.")
-        supabase: Client = create_client(supabase_url, supabase_key)
-        supabase_client_var.set(supabase)
+        client: Client = create_client(supabase_url, supabase_key)
+        _supabase_client = client
 
     except Exception as e:
         print(f"❌ DB 초기화 실패: {e}")
         print(f"상세 정보: {traceback.format_exc()}")
         raise
+
+def get_db_client() -> Client:
+    """초기화된 Supabase 클라이언트 반환"""
+    if _supabase_client is None:
+        raise RuntimeError("DB 클라이언트가 초기화되지 않았습니다. initialize_db()를 먼저 호출하세요.")
+    return _supabase_client
 
 def _handle_db_error(operation: str, error: Exception) -> None:
     """통합 DB 에러 처리"""
@@ -46,7 +56,7 @@ def _handle_db_error(operation: str, error: Exception) -> None:
 async def fetch_pending_task(limit: int = 1) -> Optional[Dict[str, Any]]:
     """Supabase RPC로 대기중인 작업 조회 및 상태 업데이트"""
     try:
-        supabase = supabase_client_var.get()
+        supabase = get_db_client()
         consumer_id = socket.gethostname()
         resp = supabase.rpc(
             'api_fetch_pending_task',
@@ -60,7 +70,7 @@ async def fetch_pending_task(limit: int = 1) -> Optional[Dict[str, Any]]:
 async def fetch_task_status(todo_id: int) -> Optional[str]:
     """Supabase 테이블 조회로 작업 상태 조회"""
     try:
-        supabase = supabase_client_var.get()
+        supabase = get_db_client()
         resp = (
             supabase
             .table('todolist')
@@ -82,7 +92,7 @@ async def fetch_done_data(proc_inst_id: Optional[str]) -> Tuple[List[Any], List[
     if not proc_inst_id:
         return [], []
     try:
-        supabase = supabase_client_var.get()
+        supabase = get_db_client()
         resp = supabase.rpc(
             'api_fetch_done_data',
             {'p_proc_inst_id': proc_inst_id}
@@ -103,7 +113,7 @@ async def save_task_result(todo_id: int, result: Any, final: bool = False) -> No
     """Supabase RPC로 작업 결과 저장 호출"""
     def _sync():
         try:
-            supabase = supabase_client_var.get()
+            supabase = get_db_client()
             # 이미 dict/list면 그대로, 아니면 JSON 직렬화
             payload = result if isinstance(result, (dict, list)) else json.loads(json.dumps(result))
             supabase.rpc(
@@ -127,7 +137,7 @@ async def fetch_participants_info(user_ids: str) -> Dict:
     """사용자 또는 에이전트 정보 조회"""
     def _sync():
         try:
-            supabase = supabase_client_var.get()
+            supabase = get_db_client()
             id_list = [id.strip() for id in user_ids.split(',') if id.strip()]
             
             user_info_list = []
@@ -195,14 +205,21 @@ def _get_agent_by_id(supabase: Client, user_id: str) -> Optional[Dict]:
 # 폼 타입 조회 (Supabase)
 # ============================================================================
 
-async def fetch_form_types(tool_val: str) -> List[Dict]:
+async def fetch_form_types(tool_val: str, tenant_id: str) -> Tuple[str, List[Dict]]:
     """폼 타입 정보 조회 및 정규화"""
     def _sync():
         try:
             form_id = tool_val[12:] if tool_val.startswith('formHandler:') else tool_val
-            
-            supabase = supabase_client_var.get()
-            resp = supabase.table('form_def').select('fields_json').eq('id', form_id).execute()
+            supabase = get_db_client()
+            # id와 tenant_id가 모두 일치하는 레코드만 조회
+            resp = (
+                supabase
+                .table('form_def')
+                .select('fields_json')
+                .eq('id', form_id)
+                .eq('tenant_id', tenant_id)
+                .execute()
+            )
             fields_json = resp.data[0].get('fields_json') if resp.data else None
             
             if not fields_json:
@@ -234,7 +251,7 @@ async def fetch_all_agents() -> List[Dict[str, Any]]:
     """모든 에이전트 조회 (is_agent=True만)"""
     def _sync():
         try:
-            supabase = supabase_client_var.get()
+            supabase = get_db_client()
             
             resp = (
                 supabase

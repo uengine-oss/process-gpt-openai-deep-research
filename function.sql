@@ -11,7 +11,7 @@ BEGIN
         FROM todolist
        WHERE status = 'IN_PROGRESS' AND agent_orch = 'openai'
          AND (
-           (agent_mode = 'DRAFT' AND draft IS NULL AND draft_status IS NULL)
+           (agent_mode IN ('DRAFT','COMPLETE') AND draft IS NULL AND draft_status IS NULL)
            OR draft_status = 'FB_REQUESTED'
          )
        ORDER BY start_date

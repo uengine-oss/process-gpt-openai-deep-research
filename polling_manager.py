@@ -14,6 +14,7 @@ from database import (
     fetch_participants_info,
     fetch_form_types
 )
+from event_logger import EventLogger
 
 # ============================================================================
 # 설정 및 초기화
@@ -83,7 +84,10 @@ async def _prepare_task_inputs(row: Dict) -> Dict:
     
     # 사용자 및 폼 정보 조회
     participants = await fetch_participants_info(row.get('user_id', ''))
-    proc_form_id, form_types = await fetch_form_types(row.get('tool', ''))
+    proc_form_id, form_types = await fetch_form_types(
+        tool_val=row.get('tool', ''),
+        tenant_id=row['tenant_id']
+    )
     
     return {
         "todo_id": todo_id,
@@ -116,9 +120,21 @@ async def _execute_worker_process(inputs: Dict, todo_id: int):
         watch_task = asyncio.create_task(_watch_cancel_status())
         logger.info(f"✅ 워커 시작 (PID={current_process.pid})")
         
+        # 워커 프로세스 완료 대기
         await current_process.wait()
         if not watch_task.done():
             watch_task.cancel()
+        
+        # 서브프로세스 정상 종료 시 최종 완료 이벤트 발행
+        ev_logger = EventLogger()
+        ev_logger.emit_event(
+            event_type="crew_completed",
+            data={},
+            job_id="CREW_FINISHED",
+            crew_type="crew",
+            todo_id=todo_id,
+            proc_inst_id=inputs.get("proc_inst_id")
+        )
         
         # 종료 결과 로그
         _log_worker_result()
