@@ -5,8 +5,8 @@ import os
 import sys
 import traceback
 from typing import Optional, Dict
-from prompt_executor import generate_summary
-from database import (
+from research.prompt_executor import generate_summary
+from core.database import (
     initialize_db, 
     fetch_pending_task, 
     fetch_done_data, 
@@ -14,7 +14,7 @@ from database import (
     fetch_participants_info,
     fetch_form_types
 )
-from event_logger import EventLogger
+from config.event_logger import EventLogger
 
 # ============================================================================
 # 설정 및 초기화

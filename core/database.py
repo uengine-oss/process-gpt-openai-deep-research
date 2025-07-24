@@ -59,7 +59,7 @@ async def fetch_pending_task(limit: int = 1) -> Optional[Dict[str, Any]]:
         supabase = get_db_client()
         consumer_id = socket.gethostname()
         resp = supabase.rpc(
-            'api_fetch_pending_task',
+            'openai_deep_fetch_pending_task',
             {'p_limit': limit, 'p_consumer': consumer_id}
         ).execute()
         rows = resp.data or []
@@ -94,7 +94,7 @@ async def fetch_done_data(proc_inst_id: Optional[str]) -> Tuple[List[Any], List[
     try:
         supabase = get_db_client()
         resp = supabase.rpc(
-            'api_fetch_done_data',
+            'fetch_done_data',
             {'p_proc_inst_id': proc_inst_id}
         ).execute()
         outputs, feedbacks = [], []
@@ -117,7 +117,7 @@ async def save_task_result(todo_id: int, result: Any, final: bool = False) -> No
             # 이미 dict/list면 그대로, 아니면 JSON 직렬화
             payload = result if isinstance(result, (dict, list)) else json.loads(json.dumps(result))
             supabase.rpc(
-                'api_save_task_result',
+                'save_task_result',
                 {
                     'p_todo_id': todo_id,
                     'p_payload': payload,

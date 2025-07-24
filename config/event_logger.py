@@ -6,7 +6,7 @@ from typing import Any, Dict
 import logging
 
 from dotenv import load_dotenv
-from database import initialize_db, get_db_client
+from core.database import initialize_db, get_db_client
 
 load_dotenv()
 logger = logging.getLogger(__name__)

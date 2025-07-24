@@ -1,6 +1,6 @@
 from openai import OpenAI
 import json
-from prompt import (
+from .prompt import (
     create_execution_plan_prompt,
     create_slide_generation_prompt,
     create_text_form_generation_prompt,

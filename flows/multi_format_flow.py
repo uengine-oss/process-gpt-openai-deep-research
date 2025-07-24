@@ -6,15 +6,15 @@ from crewai.flow.flow import Flow, start, listen
 from pydantic import BaseModel, Field
 import uuid
 
-from prompt_executor import (
+from research.prompt_executor import (
     generate_execution_plan,
     generate_toc,
     generate_slide_from_report,
     generate_text_form_values
 )
-from api_deep_research import execute_research_section
-from database import save_task_result
-from event_logger import EventLogger
+from research.api_deep_research import execute_research_section
+from core.database import save_task_result
+from config.event_logger import EventLogger
 
 # ============================================================================
 # 유틸리티 함수
@@ -49,7 +49,7 @@ class ExecutionPlan(BaseModel):
     slide_phase: Phase = Field(default_factory=Phase)
     text_phase: Phase = Field(default_factory=Phase)
 
-class PromptMultiFormatState(BaseModel):
+class MultiFormatState(BaseModel):
     """프롬프트 기반 다중 포맷 플로우의 전체 상태를 관리하는 모델"""
     topic: str = ""
     user_info: List[Dict[str, Any]] = Field(default_factory=list)
@@ -70,7 +70,7 @@ class PromptMultiFormatState(BaseModel):
 # 메인 플로우 클래스
 # ============================================================================
 
-class PromptMultiFormatFlow(Flow[PromptMultiFormatState]):
+class PromptMultiFormatFlow(Flow[MultiFormatState]):
     """프롬프트 기반 다중 포맷 생성 플로우 (리포트 → 슬라이드 → 텍스트)"""
     
     def __init__(self):

@@ -55,7 +55,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning, module="websocket
 # ========================================
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from polling_manager import start_todolist_polling, initialize_connections
+from core.polling_manager import start_todolist_polling, initialize_connections
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -5,7 +5,7 @@ import os
 import sys
 from dotenv import load_dotenv
 from typing import Optional
-from event_logger import EventLogger
+from config.event_logger import EventLogger
 import openai
 
 # UTF-8 강제 설정 (한글 깨짐 방지)

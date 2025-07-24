@@ -7,12 +7,13 @@ import os
 import sys
 import asyncio
 
-# 현재 디렉토리를 Python 경로에 추가
+# 프로젝트 루트 디렉토리를 Python 경로에 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
+project_root = os.path.dirname(current_dir)  # core의 상위 디렉토리 (프로젝트 루트)
+sys.path.append(project_root)
 
-from multi_format_flow import PromptMultiFormatFlow
-from database import initialize_db
+from flows.multi_format_flow import PromptMultiFormatFlow
+from core.database import initialize_db
 
 async def main_async(inputs: dict):
     """
