@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata && \
 
 WORKDIR /app
 
-COPY . .
+COPY ../ .
 
 RUN ls
 RUN pip install --no-cache-dir -r requirements.txt
