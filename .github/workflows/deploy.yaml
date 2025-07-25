@@ -20,7 +20,7 @@ jobs:
       - name: Build and push Docker image to GHCR
         run: |
           IMAGE_TAG=$(echo $GITHUB_SHA | cut -c1-7)
-          IMAGE_NAME=ghcr.io/uengine-oss/process-gpt-execution:$IMAGE_TAG
+          IMAGE_NAME=ghcr.io/uengine-oss/openai-deep-research:$IMAGE_TAG
 
           docker build -t $IMAGE_NAME deploy
           docker push $IMAGE_NAME
