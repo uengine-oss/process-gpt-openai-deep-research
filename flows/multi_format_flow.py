@@ -14,7 +14,8 @@ from research.prompt_executor import (
 )
 from research.api_deep_research import execute_research_section
 from core.database import save_task_result
-from config.event_logger import EventLogger
+from utils.event_logger import EventLogger
+from utils.logger import handle_error, log
 
 # ============================================================================
 # 유틸리티 함수
@@ -62,7 +63,8 @@ class MultiFormatState(BaseModel):
     text_contents: Dict[str, Any] = Field(default_factory=dict)
     todo_id: Optional[int] = None
     proc_inst_id: Optional[str] = None
-    previous_context: str = ""
+    previous_outputs: str = ""  # 이전 결과물 요약 (별도 관리)
+    previous_feedback: str = ""  # 피드백 요약 (별도 관리)
     proc_form_id: Optional[str] = None
 
 
@@ -77,11 +79,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
         super().__init__()
         self.event_logger = EventLogger()
 
-    def _handle_error(self, stage: str, error: Exception) -> None:
-        """통합 에러 처리 및 로깅"""
-        error_msg = f"❌ [{stage}] 오류 발생: {str(error)}"
-        print(error_msg)
-        raise Exception(f"{stage} 실패: {error}")
+    
 
     # ========================================================================
     # 1단계: 실행 계획 생성
@@ -114,23 +112,21 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             self.state.execution_plan = ExecutionPlan.parse_obj(plan_data)
             
             # 추가: 토픽, 유저 정보, 폼 타입 로그
-            print(f"🔖 토픽: {self.state.topic}")
-            print(f"👥 유저 정보:\n{json.dumps(self.state.user_info, indent=2, ensure_ascii=False)}")
-            print(f"📑 폼 타입:\n{json.dumps(self.state.form_types, indent=2, ensure_ascii=False)}")
+            log(f"🔖 토픽: {self.state.topic}")
+            log(f"👥 유저 정보:\n{json.dumps(self.state.user_info, indent=2, ensure_ascii=False)}")
+            log(f"📑 폼 타입:\n{json.dumps(self.state.form_types, indent=2, ensure_ascii=False)}")
 
             # 추가: 실행 계획 상세 로그
-            print(f"🗒️ 실행 계획 상세:\n{json.dumps(plan_data, indent=2, ensure_ascii=False)}")
+            log(f"🗒️ 실행 계획 상세:\n{json.dumps(plan_data, indent=2, ensure_ascii=False)}")
 
-            print(f"📋 실행 계획 생성 완료: 리포트 {len(self.state.execution_plan.report_phase.forms)}개, "
-                  f"슬라이드 {len(self.state.execution_plan.slide_phase.forms)}개, "
-                  f"텍스트 {len(self.state.execution_plan.text_phase.forms)}개")
+            log(f"📋 실행 계획 생성 완료: 리포트 {len(self.state.execution_plan.report_phase.forms)}개, "
+                f"슬라이드 {len(self.state.execution_plan.slide_phase.forms)}개, "
+                f"텍스트 {len(self.state.execution_plan.text_phase.forms)}개")
             
-            # 실행 계획 결과를 final_result로 저장
+            # 실행 계획 결과를 JSON 객체로 저장
             self.event_logger.emit_event(
                 event_type="task_completed",
-                data={
-                    "final_result": cleaned_text
-                },
+                data=plan_data,
                 job_id="api-deep-research_planning_form",
                 crew_type="planning",
                 todo_id=self.state.todo_id,
@@ -139,7 +135,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
 
             return self.state.execution_plan
         except Exception as e:
-            self._handle_error("실행계획생성", e)
+            handle_error("실행계획생성", e, raise_error=True)
 
     # ========================================================================
     # 2단계: 리포트 생성
@@ -150,7 +146,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
         """실행 계획에 따라 리포트들을 생성"""
         # 리포트 생성 계획이 없으면 스킵
         if not (self.state.execution_plan and self.state.execution_plan.report_phase.forms):
-            print("⚠️ 리포트 생성 계획이 없어 스킵합니다.")
+            log("⚠️ 리포트 생성 계획이 없어 스킵합니다.")
             return {}
         try:
             for report_form in self.state.execution_plan.report_phase.forms:
@@ -159,7 +155,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                 # TOC 생성
                 sections = await self._create_report_sections(report_key)
                 # 추가: TOC 목록 로그
-                print(f"🔍 [{report_key}] TOC 목록:\n{json.dumps(sections, indent=2, ensure_ascii=False)}")
+                log(f"🔍 [{report_key}] TOC 목록:\n{json.dumps(sections, indent=2, ensure_ascii=False)}")
                 self.state.report_sections[report_key] = sections
                 self.state.section_contents[report_key] = {}
                 
@@ -171,7 +167,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                 
             return self.state.report_contents
         except Exception as e:
-            self._handle_error("리포트생성", e)
+            handle_error("리포트생성", e, raise_error=True)
 
     async def _create_report_sections(self, report_key: str) -> List[Dict[str, Any]]:
         """리포트의 TOC(목차) 생성"""
@@ -191,20 +187,18 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             )
 
             api_key = os.getenv("OPENAI_API_KEY")
-            toc_str = generate_toc(self.state.previous_context, "", api_key)
+            toc_str = generate_toc(self.state.previous_outputs, self.state.previous_feedback, api_key)
             
             # JSON 파싱
             cleaned_text = clean_json_response(toc_str)
             toc_json = json.loads(cleaned_text)
             sections = toc_json.get("toc", [])
             
-            print(f"📋 [{report_key}] TOC 생성 완료: {len(sections)}개 섹션")
+            log(f"📋 [{report_key}] TOC 생성 완료: {len(sections)}개 섹션")
 
             self.event_logger.emit_event(
                 event_type="task_completed",
-                data={
-                    "final_result": cleaned_text
-                },
+                data=toc_json,
                 job_id=f"api-deep-research_planning_sections_{report_key}",
                 crew_type="planning",
                 todo_id=self.state.todo_id,
@@ -213,7 +207,8 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
 
             return sections
         except Exception as e:
-            print(f"❌ [{report_key}] TOC 생성 실패: {str(e)}")
+            # TOC 생성 실패는 빈 목차로 대체 가능 - 비치명적
+            handle_error("TOC생성", e, raise_error=True, extra={"report_key": report_key})
             return []
 
     async def _generate_section_contents(self, report_key: str, sections: List[Dict[str, Any]]) -> None:
@@ -247,7 +242,8 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                 execute_research_section(
                     section_info=sec,
                     topic=self.state.topic, 
-                    previous_context=self.state.previous_context,
+                    previous_outputs=self.state.previous_outputs,
+                    previous_feedback=self.state.previous_feedback,
                     event_logger=self.event_logger,
                     todo_id=self.state.todo_id,
                     proc_inst_id=self.state.proc_inst_id,
@@ -271,14 +267,13 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                 try:
                     content = task.result()
                     self.state.section_contents[report_key][title] = content
-                    print(f"✅ [{report_key}] 섹션 완료: {title}")
-                    # 추가: 섹션 내용 로그
-                    print(f"📄 [{report_key}] '{title}' 내용:\n{content}")
+                    log(f"✅ [{report_key}] 섹션 완료: {title}")
+                    log(f"📄 [{report_key}] '{title}' 내용:\n{content}")
                     
                     # 섹션 완료 이벤트
                     self.event_logger.emit_event(
                         event_type="task_completed",
-                        data={"final_result": {report_key: content}},
+                        data={report_key: content},
                         job_id=f"api_{task_job_map[task]}_{report_key}",
                         crew_type="report",
                         todo_id=self.state.todo_id,
@@ -286,8 +281,9 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                     )
                     
                 except Exception as e:
+                    # 개별 섹션 실패는 오류 메시지로 대체 - 비치명적
+                    handle_error("섹션생성", e, raise_error=True, extra={"report_key": report_key, "title": title})
                     self.state.section_contents[report_key][title] = f"섹션 생성 실패: {str(e)}"
-                    print(f"❌ [{report_key}] 섹션 실패: {title} - {str(e)}")
         
                 # 중간 결과 저장
                 await self._save_intermediate_result(report_key, sections)
@@ -318,16 +314,13 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
         ])
         
         self.state.report_contents[report_key] = merged_content
-        print(f"📄 [{report_key}] 리포트 병합 완료: {len(merged_content)}자")
-        # 추가: 최종 리포트 내용 로그
-        print(f"📑 [{report_key}] 최종 리포트 내용:\n{merged_content}")
+        log(f"📄 [{report_key}] 리포트 병합 완료: {len(merged_content)}자")
+        log(f"📑 [{report_key}] 최종 리포트 내용:\n{merged_content}")
         
         # 병합 완료 이벤트
         self.event_logger.emit_event(
             event_type="task_completed",
-            data={
-                "final_result": {report_key: merged_content}
-            },
+            data={report_key: merged_content},
             job_id=f"api-deep-research_final_report_merge_{report_key}",
             crew_type="report",
             todo_id=self.state.todo_id,
@@ -350,7 +343,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
         if self.state.todo_id and self.state.proc_form_id and merged_content.strip():
             result = {self.state.proc_form_id: {report_key: merged_content}}
             await save_task_result(self.state.todo_id, result)
-            print(f"💾 [{report_key}] 중간 저장 완료: {len(self.state.section_contents[report_key])}/{len(sections)} 섹션")
+            log(f"💾 [{report_key}] 중간 저장 완료: {len(self.state.section_contents[report_key])}/{len(sections)} 섹션")
 
     # ========================================================================
     # 3단계: 슬라이드 생성
@@ -358,81 +351,48 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
 
     @listen("generate_reports")
     async def generate_slides(self) -> Dict[str, str]:
-        """리포트를 기반으로 슬라이드들을 생성"""
+        """리포트 기반 또는 이전 결과물 기반으로 슬라이드들을 생성"""
         # 슬라이드 생성 계획이 없으면 스킵
         if not (self.state.execution_plan and self.state.execution_plan.slide_phase.forms):
-            print("⚠️ 슬라이드 생성 계획이 없어 스킵합니다.")
+            log("⚠️ 슬라이드 생성 계획이 없어 스킵합니다.")
             return {}
         try:
-            print("▶️ 슬라이드 생성 시작")
+            log("▶️ 슬라이드 생성 시작")
             
             # 리포트 기반 슬라이드 생성
             if self.state.report_contents:
                 for report_key, content in self.state.report_contents.items():
-                    await self._create_slides_from_report(report_key, content)
+                    await self._create_slides(content, report_key)
+            
+            # 이전 결과물 기반 슬라이드 생성
             else:
-                # 이전 컨텍스트 기반 슬라이드 생성
-                await self._create_slides_from_context()
-            
-            
-            print("✅ 슬라이드 생성 완료")
+                await self._create_slides(self.state.previous_outputs)
+                
+            log("✅ 슬라이드 생성 완료")
             return self.state.slide_contents
             
         except Exception as e:
-            self._handle_error("슬라이드생성", e)
+            handle_error("슬라이드생성", e, raise_error=True)
 
-    async def _create_slides_from_report(self, report_key: str, content: str) -> None:
-        """특정 리포트에 의존하는 슬라이드만 생성"""
+    async def _create_slides(self, content: str, report_key: str = None) -> None:
+        """통합 슬라이드 생성 함수 - 리포트 기반 또는 이전 결과물 기반"""
         api_key = os.getenv("OPENAI_API_KEY")
         
         for slide_form in self.state.execution_plan.slide_phase.forms:
-            # 의존성 체크
-            if report_key in slide_form.get('dependencies', []):
-                slide_key = slide_form['key']
+            # 리포트 기반인 경우 dependency 체크
+            if report_key and report_key not in slide_form.get('dependencies', []):
+                continue
                 
-                # 슬라이드 시작 이벤트
-                self.event_logger.emit_event(
-                    event_type="task_started",
-                    data={
-                        "goal": f"리포트 내용을 기반으로 슬라이드를 생성합니다.",
-                        "name": "OpenAI Deep Research",
-                        "role": "리포트 내용을 기반으로 슬라이드를 생성하는 에이전트",
-                        "agent_profile": "/images/chat-icon.png"
-                    },
-                    job_id=f"api-deep-research_generate_slides_{slide_key}",
-                    crew_type="slide",
-                    todo_id=self.state.todo_id,
-                    proc_inst_id=self.state.proc_inst_id
-                )
-                # 슬라이드 생성
-                slide_content = generate_slide_from_report(
-                    content, self.state.user_info, api_key
-                )
-                self.state.slide_contents[slide_key] = slide_content
-                print(f"🎯 [{slide_key}] 슬라이드 생성 완료 (from {report_key})")
-                # 슬라이드 완료 이벤트
-                self.event_logger.emit_event(
-                    event_type="task_completed",
-                    data={"final_result": {slide_key: slide_content}},
-                    job_id=f"api-deep-research_generate_slides_{slide_key}",
-                    crew_type="slide",
-                    todo_id=self.state.todo_id,
-                    proc_inst_id=self.state.proc_inst_id
-                )
-
-    async def _create_slides_from_context(self) -> None:
-        """이전 컨텍스트를 기반으로 슬라이드 생성"""
-        api_key = os.getenv("OPENAI_API_KEY")
-        
-        for slide_form in self.state.execution_plan.slide_phase.forms:
             slide_key = slide_form['key']
-            # 슬라이드 시작 이벤트 (context)
+            
+            # 슬라이드 시작 이벤트
+            goal_text = f"리포트 내용을 기반으로 슬라이드를 생성합니다." if report_key else "이전 결과물을 기반으로 슬라이드를 생성합니다."
             self.event_logger.emit_event(
                 event_type="task_started",
                 data={
-                    "goal": "컨텍스트를 기반으로 슬라이드를 생성합니다.",
+                    "goal": goal_text,
                     "name": "OpenAI Deep Research",
-                    "role": "컨텍스트를 기반으로 슬라이드를 생성하는 에이전트",
+                    "role": "내용을 기반으로 슬라이드를 생성하는 에이전트",
                     "agent_profile": "/images/chat-icon.png"
                 },
                 job_id=f"api-deep-research_generate_slides_{slide_key}",
@@ -440,16 +400,24 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                 todo_id=self.state.todo_id,
                 proc_inst_id=self.state.proc_inst_id
             )
-            # 슬라이드 생성
+            
+            # 슬라이드 생성 (분리된 피드백 전달)
             slide_content = generate_slide_from_report(
-                self.state.previous_context, self.state.user_info, api_key
+                content, 
+                self.state.user_info, 
+                api_key,
+                previous_outputs_summary=self.state.previous_outputs,
+                feedback_summary=self.state.previous_feedback
             )
             self.state.slide_contents[slide_key] = slide_content
-            print(f"🎯 [{slide_key}] 슬라이드 생성 완료 (from context)")
-            # 슬라이드 완료 이벤트 (context)
+            
+            source_text = f"from {report_key}" if report_key else "from previous outputs"
+            log(f"🎯 [{slide_key}] 슬라이드 생성 완료 ({source_text})")
+            
+            # 슬라이드 완료 이벤트
             self.event_logger.emit_event(
                 event_type="task_completed",
-                data={"final_result": {slide_key: slide_content}},
+                data={slide_key: slide_content},
                 job_id=f"api-deep-research_generate_slides_{slide_key}",
                 crew_type="slide",
                 todo_id=self.state.todo_id,
@@ -462,20 +430,21 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
 
     @listen("generate_slides")
     async def generate_texts(self) -> Dict[str, Any]:
-        """리포트를 기반으로 텍스트 폼들을 생성"""
+        """텍스트 폼 생성 - 리포트 내용 또는 이전 결과물 기반"""
         # 텍스트 생성 계획이 없으면 스킵
         if not (self.state.execution_plan and self.state.execution_plan.text_phase.forms):
-            print("⚠️ 텍스트 생성 계획이 없어 스킵합니다.")
+            log("⚠️ 텍스트 생성 계획이 없어 스킵합니다.")
             return {}
         try:
-            print("▶️ 텍스트 생성 시작")
-            # 텍스트 생성 시작 이벤트
+            log("▶️ 텍스트 생성 시작")
+            
+            # 텍스트 생성 시작 이벤트 (한 번만)
             self.event_logger.emit_event(
                 event_type="task_started",
                 data={
-                    "goal": "컨텍스트 텍스트 폼을 생성합니다.",
+                    "goal": "모든 텍스트 폼 값을 생성합니다.",
                     "name": "OpenAI Deep Research",
-                    "role": "리포트를 기반으로 텍스트 폼을 생성하는 에이전트",
+                    "role": "내용을 기반으로 텍스트 폼 값들을 생성하는 에이전트",
                     "agent_profile": "/images/chat-icon.png"
                 },
                 job_id="api-deep-research_generate_texts",
@@ -484,86 +453,74 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                 proc_inst_id=self.state.proc_inst_id
             )
             
-            # 리포트 기반 텍스트 생성
+            # content 결정: 리포트가 있으면 리포트, 없으면 이전 결과물
             if self.state.report_contents:
-                for report_key, content in self.state.report_contents.items():
-                    await self._create_texts_from_report(report_key, content)
+                content = self.state.report_contents  # 리포트 내용
             else:
-                # 이전 컨텍스트 기반 텍스트 생성
-                await self._create_texts_from_context()
+                content = self.state.previous_outputs or ""  # 이전 결과물
             
-            # 텍스트 생성 완료 이벤트
+            # 모든 매칭된 텍스트 폼들을 수집
+            matched_forms = []
+            for text_form in self.state.execution_plan.text_phase.forms:
+                text_key = text_form['key']
+                # 실행계획의 key에 해당하는 form_type만 필터링
+                target_form_type = [ft for ft in self.state.form_types if ft.get('key') == text_key]
+                if target_form_type:
+                    matched_forms.extend(target_form_type)
+            
+            # 매칭된 모든 폼을 한 번에 처리
+            if matched_forms:
+                await self._generate_all_text_content(content, matched_forms)
+            
+            # 텍스트 생성 완료 이벤트 (한 번만)
             self.event_logger.emit_event(
                 event_type="task_completed",
-                data={
-                    "final_result": self.state.text_contents
-                },
+                data=self.state.text_contents,
                 job_id="api-deep-research_generate_texts",
                 crew_type="text",
                 todo_id=self.state.todo_id,
                 proc_inst_id=self.state.proc_inst_id
             )
-            
-            print("✅ 텍스트 생성 완료")
+                
+            log("✅ 텍스트 생성 완료")
             return self.state.text_contents
             
         except Exception as e:
-            self._handle_error("텍스트생성", e)
+            handle_error("텍스트생성", e, raise_error=True)
 
-    async def _create_texts_from_report(self, report_key: str, content: str) -> None:
-        """특정 리포트에 의존하는 텍스트 폼들만 생성"""
+    async def _generate_all_text_content(self, content: Any, matched_forms: List[Dict]) -> None:
+        """모든 매칭된 텍스트 폼을 한 번에 처리"""
         api_key = os.getenv("OPENAI_API_KEY")
         
-        # 의존성이 있는 텍스트 폼들 찾기
-        dependent_forms = [
-            form for form in self.state.execution_plan.text_phase.forms
-            if report_key in form.get('dependencies', [])
-        ]
-        
-        if dependent_forms:
-            form_keys = [form['key'] for form in dependent_forms]
-            await self._generate_text_content(content, form_keys, report_key)
+        log(f"📝 텍스트 폼 {len(matched_forms)}개 일괄 생성 중...")
 
-    async def _create_texts_from_context(self) -> None:
-        """이전 컨텍스트를 기반으로 텍스트 생성"""
-        if self.state.execution_plan.text_phase.forms:
-            form_keys = [form['key'] for form in self.state.execution_plan.text_phase.forms]
-            await self._generate_text_content("", form_keys, "context")
-
-    async def _generate_text_content(self, content: str, form_keys: List[str], source: str) -> None:
-        """텍스트 내용 생성 및 결과 파싱"""
-        api_key = os.getenv("OPENAI_API_KEY")
-        
+        # 모든 매칭된 폼 정보를 한 번에 전달
         result_text = generate_text_form_values(
             content,
             self.state.topic,
-            form_keys,
+            matched_forms,  # 모든 매칭된 폼 객체들
             self.state.user_info,
-            api_key
+            api_key,
+            previous_outputs_summary=self.state.previous_outputs,
+            feedback_summary=self.state.previous_feedback
         )
         
-        await self._parse_text_results(result_text, form_keys, source)
+        await self._parse_all_text_results(result_text)
+        log(f"✅ 텍스트 폼 {len(matched_forms)}개 일괄 생성 완료")
 
-    async def _parse_text_results(self, raw_result: str, form_keys: List[str], source: str) -> None:
-        """텍스트 생성 결과를 파싱하여 각 폼에 할당"""
+    async def _parse_all_text_results(self, raw_result: str) -> None:
+        """모든 텍스트 결과를 파싱하여 저장"""
         try:
-            # JSON 파싱 시도
             cleaned_result = clean_json_response(raw_result)
             parsed_results = json.loads(cleaned_result)
-            
-            for form_key in form_keys:
-                if form_key in parsed_results:
-                    self.state.text_contents[form_key] = parsed_results[form_key]
-                    print(f"📝 [{form_key}] 텍스트 생성 완료 (from {source})")
-                else:
-                    self.state.text_contents[form_key] = raw_result
-                    print(f"📝 [{form_key}] 텍스트 생성 완료 (raw, from {source})")
+            # 전체 결과를 그대로 저장
+            if isinstance(parsed_results, dict):
+                self.state.text_contents = parsed_results
+            else:
+                self.state.text_contents = {"text": cleaned_result}
                     
         except json.JSONDecodeError:
-            # JSON 파싱 실패 시 원본 텍스트를 모든 폼에 할당
-            for form_key in form_keys:
-                self.state.text_contents[form_key] = raw_result
-                print(f"📝 [{form_key}] 텍스트 생성 완료 (fallback, from {source})")
+            self.state.text_contents = {"text": str(raw_result)}
 
     # ========================================================================
     # 5단계: 최종 저장
@@ -573,9 +530,9 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
     async def save_final_results(self) -> None:
         """모든 결과를 최종 저장하고 완료 이벤트 발행"""
         try:
-            print("\n" + "="*60)
-            print("🎉 프롬프트 다중 포맷 생성 완료!")
-            print("="*60)
+            log("\n" + "="*60)
+            log("🎉 프롬프트 다중 포맷 생성 완료!")
+            log("="*60)
             
             # 최종 결과 DB 저장
             if self.state.todo_id and self.state.proc_form_id:
@@ -593,7 +550,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                     report_count = len(self.state.report_contents)
                     slide_count = len(self.state.slide_contents)
                     text_count = len(self.state.text_contents)
-                    print(f"📊 처리 결과: 리포트 {report_count}개, 슬라이드 {slide_count}개, 텍스트 {text_count}개")
+                    log(f"📊 처리 결과: 리포트 {report_count}개, 슬라이드 {slide_count}개, 텍스트 {text_count}개")
             
         except Exception as e:
-            self._handle_error("최종결과저장", e) 
+            handle_error("최종결과저장", e, raise_error=True)

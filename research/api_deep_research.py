@@ -5,7 +5,8 @@ import os
 import sys
 from dotenv import load_dotenv
 from typing import Optional
-from config.event_logger import EventLogger
+from utils.event_logger import EventLogger
+from utils.logger import log
 import openai
 
 # UTF-8 강제 설정 (한글 깨짐 방지)
@@ -26,14 +27,15 @@ tools = [
 # 본문 출력 최소 단위
 CHAR_THRESHOLD = 1000
 
-async def execute_research_section(section_info: dict, topic: str = "", previous_context: str = "", event_logger: Optional[EventLogger] = None, todo_id: Optional[str] = None, proc_inst_id: Optional[str] = None, job_id: Optional[str] = None):
+async def execute_research_section(section_info: dict, topic: str = "", previous_outputs: str = "", previous_feedback: str = "", event_logger: Optional[EventLogger] = None, todo_id: Optional[str] = None, proc_inst_id: Optional[str] = None, job_id: Optional[str] = None):
     """
     개별 섹션에 대한 리서치를 실행하는 함수
     
     Args:
         section_info: 섹션 정보 (number, title, subsections 등)
         topic: 주제
-        previous_context: 이전 컨텍스트
+        previous_outputs: 이전 결과물 요약
+        previous_feedback: 피드백 요약
         event_logger: EventLogger instance for logging events
         todo_id: Todo ID for logging events
         proc_inst_id: Process Instance ID for logging events
@@ -46,7 +48,7 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
     number = section_info.get("number", "")
     subsections = section_info.get("subsections", [])
     
-    print(f"\n=== 섹션 리서치 시작: {number}. {title} ===")
+    log(f"\n=== 섹션 리서치 시작: {number}. {title} ===")
     buffer = ""
     full_text = ""
 
@@ -67,14 +69,21 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
 - 섹션 번호: {number}
 - 섹션 제목: {title}{subsection_structure}
 
-**🔍 이전 컨텍스트 분석:**
-{previous_context}
+**🔍 컨텍스트 분석:**
 
-다음 단계에 따라 이전 컨텍스트를 철저히 분석하세요:
-1. **요구사항 파악**: 전체 프로젝트의 목적과 구체적 요구사항 확인
-2. **이전 보고서 내용 요약**: 앞선 섹션들에서 다룬 핵심 내용과 결론 파악
-3. **피드백 우선 반영**: 사용자 피드백이 있다면 최우선으로 반영 (재요청 의미), 없으면 무시하고 진행
-4. **문맥 흐름 유지**: 전체 보고서의 논리적 일관성과 연결성 확보
+**이전 결과물 요약:**
+{previous_outputs}
+
+**피드백 요약:**
+{previous_feedback}
+
+**컨텍스트 분석 단계:**
+1. **이전 결과물 문맥 파악**: previous_outputs를 분석하여 이전에 무엇을 했는지, 어떤 목적과 요구사항이 있었는지 정확히 이해
+2. **피드백 우선 반영**: previous_feedback을 최우선으로 분석하여 사용자가 원하는 개선사항과 요구사항을 파악하고 이를 섹션 생성에 적극 반영
+3. **연계성 확보**: 이전 작업의 흐름과 피드백 요구사항을 모두 고려하여 완전히 새로운 섹션이 아닌 개선된 섹션 생성
+4. **목적 정렬**: 최종 목표와 사용자 의도에 부합하는 섹션 내용 작성
+5. **요구사항 파악**: 전체 프로젝트의 목적과 구체적 요구사항 확인
+6. **문맥 흐름 유지**: 전체 작업의 논리적 일관성과 연결성 확보
 
 **📊 작업 지침:**
 
@@ -87,10 +96,12 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
 - **적용/실무** → 실무 적용 방안, 실행 계획, 구체적 사례, 체크리스트
 - **결론/제언** → 연구 결과 종합, 핵심 시사점, 정책 제언, 향후 과제
 
-**2. 이전 컨텍스트 반영**
-- 이전 컨텍스트의 요구사항, 피드백, 목적을 철저히 분석하여 반영
-- 전체 프로젝트의 목표와 방향성을 현재 섹션에 일관되게 유지
-- 이전 단계에서 제기된 문제점이나 개선사항을 적극적으로 고려
+**2. 컨텍스트 반영**
+- **이전 결과물 연계**: 이전 결과물의 요구사항, 목적을 철저히 분석하여 현재 섹션에 연속성 있게 반영
+- **피드백 최우선 적용**: 피드백이 있다면 최우선으로 반영하여 사용자 요구사항에 부합하는 개선된 내용 작성
+- **목표 일관성**: 전체 프로젝트의 목표와 방향성을 현재 섹션에 일관되게 유지
+- **개선사항 적용**: 제기된 문제점이나 개선사항을 적극적으로 분석하고 현재 섹션에 구체적으로 적용
+- **사용자 의도 우선**: 피드백에서 드러난 사용자 의도와 기대사항을 섹션 작성의 핵심 기준으로 설정
 
 **3. 내용 구성 원칙**
 - **심층성**: 표면적 설명이 아닌 전문가 수준의 심층 분석
@@ -168,10 +179,10 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
 
             # 2) 툴 호출 시작 및 파라미터 (output_item.added)
             if et == "response.output_item.added" and hasattr(evt, "item") and evt.item.type.endswith("_call"):
-                print(f"[{number}] 📋 툴 시작 이벤트 정보: {evt}")
+                log(f"[{number}] 📋 툴 시작 이벤트 정보: {evt}")
                 tool_name = evt.item.type
                 params = getattr(evt.item, "action", None) or getattr(evt.item, "arguments", None)
-                print(f"[{number}] 🔧 Tool 시작 → {tool_name}, params={params}")
+                log(f"[{number}] 🔧 Tool 시작 → {tool_name}, params={params}")
 
                 event_logger.emit_event(
                     event_type="tool_usage_started",
@@ -184,7 +195,7 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
 
             # 3) 툴 호출 완료 및 결과 (output_item.done)
             elif et == "response.output_item.done" and hasattr(evt, "item") and evt.item.type.endswith("_call"):
-                print(f"[{number}] 📋 툴 완료 이벤트 정보: {evt}")
+                log(f"[{number}] 📋 툴 완료 이벤트 정보: {evt}")
                 tool_name = evt.item.type
                 # result = getattr(evt.item, "outputs", None) or getattr(evt.item, "action", None)
                 action = getattr(evt.item, "action", {}) or {}
@@ -208,11 +219,11 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
 
                 info = f"{verb}: {value}"
 
-                print(f"[{number}] ✅ Tool 완료 → {tool_name}, info={info}")
+                log(f"[{number}] ✅ Tool 완료 → {tool_name}, info={info}")
 
                 # 간단한 null byte 체크
                 if '\u0000' in info or '\x00' in info:
-                    print(f"[{number}] ⚠️ null byte 감지 → 이벤트 스킵")
+                    log(f"[{number}] ⚠️ null byte 감지 → 이벤트 스킵")
                 else:
                     event_logger.emit_event(
                         event_type="tool_usage_finished",
@@ -228,23 +239,23 @@ async def execute_research_section(section_info: dict, topic: str = "", previous
 
             # 4) 본문 스트리밍 청크
             elif et == "response.output_text.delta":
-                print(f"[{number}] 📋 본문 스트리밍 청크 이벤트 정보: {evt}")
+                log(f"[{number}] 📋 본문 스트리밍 청크 이벤트 정보: {evt}")
                 # delta 이벤트에서 스트리밍된 텍스트를 직접 가져오기
                 delta = getattr(evt, "delta", "")
                 buffer += delta
                 full_text += delta
                 if len(buffer) >= CHAR_THRESHOLD:
-                    print(f"[{number}] 📄 본문 (버퍼 {CHAR_THRESHOLD}자):\n{buffer}")
+                    log(f"[{number}] 📄 본문 (버퍼 {CHAR_THRESHOLD}자):\n{buffer}")
                     buffer = ""
 
             # 그 외 이벤트는 무시
 
         # 남은 버퍼 출력
         if buffer:
-            print(f"[{number}] 📄 본문 (마지막):\n{buffer}")
+            log(f"[{number}] 📄 본문 (마지막):\n{buffer}")
 
         # 최종 본문 전체 출력
-        print(f"[{number}] 📢 최종 결과:\n{full_text}")
+        log(f"[{number}] 📢 최종 결과:\n{full_text}")
         return full_text
 
     finally:
