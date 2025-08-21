@@ -107,9 +107,11 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             api_key = os.getenv("OPENAI_API_KEY")
             plan_str = generate_execution_plan(self.state.form_types, self.state.user_info, api_key)
             
-            # JSON 파싱 및 계획 저장
+            # JSON 파싱 및 계획 저장 (로직은 execution_plan만 사용)
             cleaned_text = clean_json_response(plan_str)
-            plan_data = json.loads(cleaned_text).get("execution_plan", {})
+            parsed = json.loads(cleaned_text)
+            plan_data = parsed.get("execution_plan", {})
+            explanation_text = parsed.get("explanation_text")
             self.state.execution_plan = ExecutionPlan.parse_obj(plan_data)
             
             # 추가: 토픽, 유저 정보, 폼 타입 로그
@@ -126,10 +128,16 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
                 f"슬라이드 {len(self.state.execution_plan.slide_phase.forms)}개, "
                 f"텍스트 {len(self.state.execution_plan.text_phase.forms)}개")
             
-            # 실행 계획 결과를 JSON 객체로 저장
+            # 실행 계획 결과 이벤트에 explanation_text만 추가로 포함 (로직에는 미사용)
+            event_payload = {**plan_data}
+            if explanation_text:
+                event_payload = {"execution_plan": plan_data, "explanation_text": explanation_text}
+            else:
+                event_payload = {"execution_plan": plan_data}
+
             self.event_logger.emit_event(
                 event_type="task_completed",
-                data=plan_data,
+                data=event_payload,
                 job_id="api-deep-research_planning_form",
                 crew_type="planning",
                 todo_id=self.state.todo_id,
@@ -196,12 +204,18 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             cleaned_text = clean_json_response(toc_str)
             toc_json = json.loads(cleaned_text)
             sections = toc_json.get("toc", [])
+            explanation_text = toc_json.get("explanation_text")
             
             log(f"📋 [{report_key}] TOC 생성 완료: {len(sections)}개 섹션")
 
+            # 이벤트에 explanation_text를 포함 (로직에는 미사용)
+            toc_event = {"toc": sections}
+            if explanation_text:
+                toc_event["explanation_text"] = explanation_text
+
             self.event_logger.emit_event(
                 event_type="task_completed",
-                data=toc_json,
+                data=toc_event,
                 job_id=f"api-deep-research_planning_sections_{report_key}",
                 crew_type="planning",
                 todo_id=self.state.todo_id,

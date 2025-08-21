@@ -200,14 +200,14 @@ async def update_task_completed(todo_id: str) -> None:
         (
             supabase
             .table('todolist')
-            .update({'draft_status': 'DONE', 'consumer': None})
+            .update({'draft_status': 'COMPLETED', 'consumer': None})
             .eq('id', todo_id)
             .execute()
         )
         log(f"작업 완료 상태 업데이트: {todo_id}")
     except Exception as e:
-        # 폴링에서 호출되므로 비치명적 처리
-        handle_error("완료상태오류", e, raise_error=True)
+        # 상태 업데이트 실패 자체는 폴링 불사 정책에 따라 비치명
+        handle_error("완료상태오류", e, raise_error=False)
 
 
 async def update_task_error(todo_id: str) -> None:

@@ -161,7 +161,7 @@ def _log_worker_result():
     if worker_terminated_by_us:
         log(f"🛑 워커 사용자 중단됨 (PID={current_process.pid})")
     elif current_process.returncode != 0:  
-        print(f"❌ 워커 비정상 종료 (code={current_process.returncode})", flush=True)
+        log(f"❌ 워커 비정상 종료 (code={current_process.returncode})")
     else:
         log(f"✅ 워커 정상 종료 (PID={current_process.pid})")
 
