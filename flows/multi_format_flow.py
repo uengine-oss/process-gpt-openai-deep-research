@@ -105,7 +105,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             )
             
             api_key = os.getenv("OPENAI_API_KEY")
-            plan_str = generate_execution_plan(self.state.form_types, api_key)
+            plan_str = generate_execution_plan(self.state.form_types, self.state.user_info, api_key)
             
             # JSON 파싱 및 계획 저장
             cleaned_text = clean_json_response(plan_str)
@@ -190,7 +190,7 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             )
 
             api_key = os.getenv("OPENAI_API_KEY")
-            toc_str = generate_toc(self.state.previous_outputs, self.state.previous_feedback, api_key)
+            toc_str = generate_toc(self.state.previous_outputs, self.state.previous_feedback, self.state.user_info, api_key)
             
             # JSON 파싱
             cleaned_text = clean_json_response(toc_str)

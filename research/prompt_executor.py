@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 # 동기 함수들 - 기존 호환성 유지
 # ============================================================================
 
-def generate_execution_plan(form_types: list, openai_api_key: str, model: str = "gpt-4o-mini") -> str:
-    prompt = create_execution_plan_prompt(form_types)
+def generate_execution_plan(form_types: list, user_info: list, openai_api_key: str, model: str = "gpt-4o-mini") -> str:
+    prompt = create_execution_plan_prompt(form_types, user_info)
     client = OpenAI(api_key=openai_api_key)
 
     def _once() -> str:
@@ -102,8 +102,8 @@ def generate_text_form_values(report_content: str, topic: str, text_forms: list,
     handle_error("텍스트폼 OpenAI 최종실패", last_error or Exception("unknown"), raise_error=True)
     return "{}"
 
-def generate_toc(previous_outputs_summary: str = "", feedback_summary: str = "", openai_api_key: str = "", model: str = "gpt-4o-mini") -> str:
-    prompt = create_toc_prompt(previous_outputs_summary, feedback_summary)
+def generate_toc(previous_outputs_summary: str = "", feedback_summary: str = "", user_info: list | None = None, openai_api_key: str = "", model: str = "gpt-4o-mini") -> str:
+    prompt = create_toc_prompt(previous_outputs_summary, feedback_summary, user_info or [])
     system_prompt = """당신은 전문 보고서 구조 설계 전문가입니다.\n\n## 핵심 역할\n- 복잡한 정보를 논리적이고 체계적인 보고서 구조로 설계\n- 독자 친화적이면서도 전문적인 목차(TOC) 생성\n- 실무에서 즉시 활용 가능한 실용적 구조 제공\n- 컨텍스트를 완벽히 이해하고 맞춤형 목차 구성\n\n## 전문성 기준\n1. **논리성**: 명확한 도입-본론-결론 구조\n2. **체계성**: 일관된 분류와 위계질서\n3. **실용성**: 실제 작성시 활용도 높은 구조\n4. **완성도**: 누락 없는 포괄적 구성\n5. **독창성**: 컨텍스트에 특화된 맞춤형 설계\n\n## 작업 방식\n- 컨텍스트 정보를 철저히 분석하여 핵심 영역 파악\n- 논리적 흐름을 고려한 순서 배치\n- 각 레벨별 적절한 분량과 깊이 조절\n- 실무 활용도를 최우선으로 고려한 구조 설계\n- 독자 편의성과 전문성의 균형 유지\n\n## 품질 기준\n⭐ 우수: 논리적 흐름이 완벽하고, 실무 활용도가 매우 높음\n⭐ 양호: 구조적 완성도는 있으나, 일부 개선 여지 존재\n⭐ 미흡: 기본 구조는 갖추었으나, 논리성이나 실용성 부족\n\n목표: 항상 ⭐ 우수 수준의 목차 생성"""
     client = OpenAI(api_key=openai_api_key)
 

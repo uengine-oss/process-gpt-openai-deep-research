@@ -3,12 +3,13 @@
 프롬프트 생성 함수 모음
 """
 
-def create_execution_plan_prompt(form_types: list) -> str:
+def create_execution_plan_prompt(form_types: list, user_info: list) -> str:
     prompt = f"""
 주어진 폼 타입들을 처리하기 위한 종합적인 실행 계획을 수립하세요.
 
 입력 데이터:
 - 폼 타입들: {form_types}
+- 담당자 정보: {user_info}
 
 핵심 실행 규칙:
 1. **엄격한 단계 순서**: 리포트 → 슬라이드 → 텍스트 (단계 간 중복 처리 금지)
@@ -36,7 +37,7 @@ def create_execution_plan_prompt(form_types: list) -> str:
 입력에서 실제로 매칭되는 폼만 forms 배열에 포함시키세요. 
 빈 단계는 빈 forms 배열 []로 설정하세요.
 
-완전한 JSON 실행 계획을 출력하세요:
+완전한 JSON 실행 계획을 출력하세요 (explanation_text 포함):
 {{
     "execution_plan": {{
         "report_phase": {{
@@ -57,8 +58,16 @@ def create_execution_plan_prompt(form_types: list) -> str:
                 {{"key": "text_form_2", "dependencies": ["report_form_2"]}}
             ]
         }}
-    }}
+    }},
+    "explanation_text": "계획을 이렇게 구성했다 / 왜 그렇게 했는지에 대한 간단한 한국어 설명"
 }}
+
+설명 텍스트(explanation_text) 작성 규칙:
+- 한국어 자연어의 마크다운으로 작성 (헤딩/불릿 허용, 코드블록(\`\`\`)·표·JSON 표기는 금지)
+- 반드시 포함: 단계별 폼 수 요약과 의존성 설정 근거, 처리 순서 요약
+  - 예: "report 2개, slide 1개, text 3개"
+  - 예: "slide_x는 report_a에 의존 (키워드 매칭: a)"
+- 길이: 5~10줄 내외로 핵심만 요약
 
 슬라이드 및 텍스트의 의미적 관계 규칙:
 - **정확한 이름 매칭**: 슬라이드/텍스트와 리포트의 이름이 유사하면 의존성 생성
@@ -82,7 +91,7 @@ def create_execution_plan_prompt(form_types: list) -> str:
 """
     return prompt
 
-def create_toc_prompt(previous_outputs_summary: str = "", feedback_summary: str = "") -> str:
+def create_toc_prompt(previous_outputs_summary: str = "", feedback_summary: str = "", user_info: list | None = None) -> str:
     return f"""
 당신은 전문적인 보고서 목차(TOC) 생성 전문가입니다.
 
@@ -106,9 +115,10 @@ def create_toc_prompt(previous_outputs_summary: str = "", feedback_summary: str 
 **입력 정보:**
 - 이전 결과물 요약: {previous_outputs_summary}
 - 피드백 요약: {feedback_summary}
+- 담당자 정보: {user_info}
 
 **결과 형식 (JSON):**
-다음과 같은 예시 구조로 목차를 생성하세요:
+다음과 같은 예시 구조로 목차를 생성하세요 (explanation_text 포함):
 
 {{
   "title": "보고서 제목",
@@ -141,7 +151,15 @@ def create_toc_prompt(previous_outputs_summary: str = "", feedback_summary: str 
       ]
     }}
   ]
+  ],
+  "explanation_text": "목차를 이렇게 구성했다 / 왜 그렇게 했는지에 대한 간단한 한국어 설명"
 }}
+
+설명 텍스트(explanation_text) 작성 규칙:
+- 한국어 자연어의 마크다운으로 작성 (헤딩/불릿 허용, 코드블록(\`\`\`)·표·JSON 표기는 금지)
+- 반드시 포함: 생성된 목차의 섹션 수 요약, 상·하위 항목 개수, 구성/순서의 근거 , 생성된 상위 섹션들의 번호와 제목 목록을 불릿으로 명시
+  - 예: "- 1. 서론", "- 2. 핵심 분석", "- 3. 결론 및 제언"
+- 길이: 5~10줄 내외로 핵심만 요약
 
 위 예시를 참고하여 컨텍스트 내용에 맞는 구체적이고 실용적인 목차를 JSON 형식으로 생성하세요.
 """ 
@@ -151,11 +169,11 @@ def create_slide_generation_prompt(content: str, user_info: list, previous_outpu
     prompt = f"""
 제공된 리포트 내용과 컨텍스트를 종합 분석한 후, reveal.js 호환 마크다운 슬라이드 프레젠테이션을 완성도 높게 생성하세요.
 
-**입력 정보:**
+**입력 정보 (담당자):**
 - 현재 리포트/내용: {content}
 - 이전 결과물 요약: {previous_outputs_summary}
 - 피드백 요약: {feedback_summary}
-- 사용자 정보: {user_info}
+- 담당자 정보: {user_info}
 
 **1단계: 컨텍스트 분석**
 1. **이전 결과물 문맥 파악**: previous_outputs_summary를 분석하여 이전에 무엇을 했는지, 어떤 목적과 요구사항이 있었는지 정확히 이해
@@ -178,10 +196,10 @@ def create_slide_generation_prompt(content: str, user_info: list, previous_outpu
 - 헤더, 불릿 포인트, 적절한 강조가 포함된 올바른 형식 적용
 - 전환 효과를 포함하고 프레젠테이션 전체에서 시각적 일관성 유지
 
-**핵심 지침**: 사용자 정보가 제공되면 프레젠테이션에 포함하세요:
-- 제목 슬라이드에서 user_info.name을 발표자 이름으로 사용
-- 관련 있는 경우 user_info.position과 user_info.department 포함
-- 적절한 경우 사용자 컨텍스트로 프레젠테이션 개인화
+**핵심 지침**: 담당자 정보가 제공되면 프레젠테이션에 포함하세요:
+- 제목 슬라이드에서 담당자 이름(user_info.name)을 발표자/검토자 이름으로 사용
+- 관련 있는 경우 담당자의 직책(position)과 부서(department) 포함
+- 적절한 경우 담당자 컨텍스트로 프레젠테이션 개인화
 
 **필수 슬라이드 구성:**
 1. **제목 슬라이드** - 주제, 발표자 이름(user_info에서), 메타데이터 포함
@@ -218,13 +236,14 @@ def create_text_form_generation_prompt(report_content: str, topic: str, text_for
     prompt = f"""
 제공된 폼 타입 정보를 기반으로 전문적이고 실용적인 값을 생성하세요.
 
-**입력 정보**:
+**입력 정보 (담당자 포함)**:
 - 리포트 내용 또는 이전 작업 내용: {report_content}
 - 피드백: {feedback_summary}
 - 이전 결과물: {previous_outputs_summary}
 - 워크플로우 단계: {topic}
 - 폼 타입 정보: {text_forms}
  - 폼 HTML 템플릿: {form_html}
+ - 담당자 정보: {user_info}
 
 **컨텍스트 분석 단계:**
 1. **이전 결과물 문맥 파악**: previous_outputs_summary를 분석하여 이전에 무엇을 했는지, 어떤 목적과 요구사항이 있었는지 정확히 이해
@@ -251,7 +270,7 @@ def create_text_form_generation_prompt(report_content: str, topic: str, text_for
 - **textarea 타입**: 상세한 설명이나 긴 텍스트 (여러 줄, 구체적 내용)
  - **radio 타입**: HTML 내 해당 필드(name 속성)의 items 속성(JSON 유사 문자열)에서 키(예: approve/reject) 목록을 파싱하고, 컨텍스트에 가장 적합한 키를 그대로 값으로 반환. 예: items="[{{'approve':'승인'}}, {{'reject':'반려'}}]" → "reject".
 
-**사용자 관련 필드**: 전달된 내용을 분석하여, 정확히 가져오기 (이름, 부서, 직급, 이메일 등)
+**담당자 관련 필드**: 전달된 담당자 정보를 기반으로, 이름, 부서, 직급, 이메일 등 관련 필드를 정확히 생성
 
 **중요**: 폼 text를 면밀히 분석하여 의미에 맞는 실용적인 값을 생성하세요. 
 예시: text가 "수량"이면 type이 text여도 숫자를 생성해야 합니다.
