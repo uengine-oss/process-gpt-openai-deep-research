@@ -86,8 +86,8 @@ async def _prepare_task_inputs(row: Dict) -> Dict:
         output_summary, feedback_summary = await summarize_async(done_outputs, None, None, api_key)
     
     # 사용자 및 폼 정보 조회
-    participants = await fetch_participants_info(row.get('user_id', ''))
-    proc_form_id, form_types = await fetch_form_types(
+    user_info_list, _ = await fetch_participants_info(row.get('user_id', ''))
+    proc_form_id, form_types, form_html = await fetch_form_types(
         tool_val=row.get('tool', ''),
         tenant_id=row['tenant_id']
     )
@@ -98,9 +98,10 @@ async def _prepare_task_inputs(row: Dict) -> Dict:
         "topic": row.get('activity_name', ''),
         "previous_outputs_summary": output_summary,
         "feedback_summary": feedback_summary,
-        "user_info": participants.get('user_info', []),
+        "user_info": (user_info_list or []),
         "form_types": form_types,
         "proc_form_id": proc_form_id,
+        "form_html": form_html,
     }
 
 # ============================================================================

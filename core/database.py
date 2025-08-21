@@ -217,7 +217,7 @@ async def update_task_error(todo_id: str) -> None:
         (
             supabase
             .table('todolist')
-            .update({'draft_status': 'ERROR', 'consumer': None})
+            .update({'draft_status': 'FAILED', 'consumer': None})
             .eq('id', todo_id)
             .execute()
         )
@@ -230,8 +230,8 @@ async def update_task_error(todo_id: str) -> None:
 # 폼 타입 조회 (Supabase)
 # ============================================================================
 
-async def fetch_form_types(tool_val: str, tenant_id: str) -> Tuple[str, List[Dict]]:
-    """폼 타입 정보 조회 및 정규화 - form_id와 form_types 함께 반환"""
+async def fetch_form_types(tool_val: str, tenant_id: str) -> Tuple[str, List[Dict], str]:
+    """폼 타입 정보 조회 및 정규화 - form_id, form_types, form_html 함께 반환"""
     def _sync():
         try:
             supabase = get_db_client()
@@ -240,18 +240,19 @@ async def fetch_form_types(tool_val: str, tenant_id: str) -> Tuple[str, List[Dic
             resp = (
                 supabase
                 .table('form_def')
-                .select('fields_json')
+                .select('fields_json, html')
                 .eq('id', form_id)
                 .eq('tenant_id', tenant_id)
                 .execute()
             )
             log(f'✅ 폼 타입 조회 완료: {resp}')
             fields_json = resp.data[0].get('fields_json') if resp.data else None
+            form_html = resp.data[0].get('html') if resp.data else ""
             log(f'✅ 폼 필드 JSON: {fields_json}')
             if not fields_json:
-                return form_id, [{'key': form_id, 'type': 'default', 'text': ''}]
+                return form_id, [{'key': form_id, 'type': 'default', 'text': ''}], (form_html or "")
 
-            return form_id, fields_json
+            return form_id, fields_json, (form_html or "")
             
         except Exception as e:
             handle_error("폼타입조회", e, raise_error=True)

@@ -16,9 +16,9 @@ def create_execution_plan_prompt(form_types: list) -> str:
 3. **가상 폼 생성 금지**: 제공된 form_types에 없는 폼 키를 임의로 생성하거나 가정하지 말 것
 
 타입 매칭 요구사항:
-- report_phase에는 "type" 필드가 정확히 "report"인 폼만 포함
-- slide_phase에는 "type" 필드가 정확히 "slide"인 폼만 포함  
-- text_phase에는 "type" 필드가 "text" 또는 "textarea"인 폼만 포함
+- report_phase에는 "type"이 "report"인 폼만 포함
+- slide_phase에는 "type"이 "slide"인 폼만 포함
+- text_phase에는 위 두 타입을 제외한 나머지 모든 폼을 포함 (예: text, textarea, radio, select, checkbox 등 기타 전부)
 - 특정 타입의 폼이 입력에 없으면 해당 단계는 빈 배열 []로 설정
 - 입력 form_types의 실제 "key" 값만 사용하고, 새로운 키는 절대 생성하지 말 것
 
@@ -213,7 +213,7 @@ def create_slide_generation_prompt(content: str, user_info: list, previous_outpu
 """
     return prompt
 
-def create_text_form_generation_prompt(report_content: str, topic: str, text_forms: list, user_info: list, previous_outputs_summary: str = "", feedback_summary: str = "") -> str:
+def create_text_form_generation_prompt(report_content: str, topic: str, text_forms: list, user_info: list, previous_outputs_summary: str = "", feedback_summary: str = "", form_html: str = "") -> str:
   
     prompt = f"""
 제공된 폼 타입 정보를 기반으로 전문적이고 실용적인 값을 생성하세요.
@@ -224,6 +224,7 @@ def create_text_form_generation_prompt(report_content: str, topic: str, text_for
 - 이전 결과물: {previous_outputs_summary}
 - 워크플로우 단계: {topic}
 - 폼 타입 정보: {text_forms}
+ - 폼 HTML 템플릿: {form_html}
 
 **컨텍스트 분석 단계:**
 1. **이전 결과물 문맥 파악**: previous_outputs_summary를 분석하여 이전에 무엇을 했는지, 어떤 목적과 요구사항이 있었는지 정확히 이해
@@ -232,8 +233,8 @@ def create_text_form_generation_prompt(report_content: str, topic: str, text_for
 4. **목적 정렬**: 최종 목표와 사용자 의도에 부합하는 실용적 값 생성
 
 **핵심 규칙**:
-1. **폼 타입 기반 생성**: form_type 배열의 각 폼에 대해 key, type, text(폼 이름)을 분석하여 값 생성
-2. **타입별 적합성**: type과 text(폼 이름)을 모두 고려하여 적절한 형식의 값 생성
+1. **폼 타입 + HTML 기반 생성**: form_type 배열의 각 폼에 대해 key, type, text(폼 이름)을 분석하고, HTML 템플릿 내 해당 필드의 위젯 정의(예: radio의 items 등)를 함께 참고하여 값 생성
+2. **타입별 적합성**: type과 text(폼 이름), HTML 위젯 속성을 모두 고려하여 적절한 형식의 값 생성
 3. **평면 JSON 구조**: 중첩 객체나 추가 필드 절대 금지
 4. **전문적 품질**: 구체적이고 상세한 값 생성 (플레이스홀더 금지)
 5. **리포트 내용 활용**: report_content는 리포트 내용 또는 이전 결과물 중 하나가 전달됨
@@ -248,6 +249,7 @@ def create_text_form_generation_prompt(report_content: str, topic: str, text_for
   * 이름이 "이름", "제목", "분류" 등 → 간단한 텍스트
   * 이름이 "금액", "비용", "가격" 등 → 숫자와 단위 (예: "1,500,000원")
 - **textarea 타입**: 상세한 설명이나 긴 텍스트 (여러 줄, 구체적 내용)
+ - **radio 타입**: HTML 내 해당 필드(name 속성)의 items 속성(JSON 유사 문자열)에서 키(예: approve/reject) 목록을 파싱하고, 컨텍스트에 가장 적합한 키를 그대로 값으로 반환. 예: items="[{{'approve':'승인'}}, {{'reject':'반려'}}]" → "reject".
 
 **사용자 관련 필드**: 전달된 내용을 분석하여, 정확히 가져오기 (이름, 부서, 직급, 이메일 등)
 
@@ -269,8 +271,9 @@ form_type 배열의 각 폼 key를 JSON 키로 사용하는 평면 JSON 객체.
 - 유효한 JSON 형식 출력
 - 각 값은 구체적이고 전문적이며 현실적이어야 함
 - 플레이스홀더나 예시 텍스트 사용 금지
+ - radio의 경우 반드시 HTML items에서 정의된 키 중 하나를 선택하여 반환 (라벨이 아닌 키)
 
-제공된 폼 타입 정보를 기반으로 고품질의 전문적인 값을 생성하여 완전한 JSON 객체로 출력하세요.
+제공된 폼 타입 정보와 HTML 템플릿을 기반으로 고품질의 전문적인 값을 생성하여 완전한 JSON 객체로 출력하세요.
 """
     return prompt
 

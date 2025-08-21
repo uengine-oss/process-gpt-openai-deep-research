@@ -77,8 +77,8 @@ def generate_slide_from_report(report_content: str, user_info: list, openai_api_
     return ""
 
 
-def generate_text_form_values(report_content: str, topic: str, text_forms: list, user_info: list, openai_api_key: str, model: str = "gpt-4o-mini", previous_outputs_summary: str = "", feedback_summary: str = "") -> str:
-    prompt = create_text_form_generation_prompt(report_content, topic, text_forms, user_info, previous_outputs_summary, feedback_summary)
+def generate_text_form_values(report_content: str, topic: str, text_forms: list, user_info: list, openai_api_key: str, model: str = "gpt-4o-mini", previous_outputs_summary: str = "", feedback_summary: str = "", form_html: str = "") -> str:
+    prompt = create_text_form_generation_prompt(report_content, topic, text_forms, user_info, previous_outputs_summary, feedback_summary, form_html)
     client = OpenAI(api_key=openai_api_key)
 
     def _once() -> str:

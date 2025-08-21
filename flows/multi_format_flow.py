@@ -55,6 +55,7 @@ class MultiFormatState(BaseModel):
     topic: str = ""
     user_info: List[Dict[str, Any]] = Field(default_factory=list)
     form_types: List[Dict[str, Any]] = Field(default_factory=list)
+    form_html: str = ""
     execution_plan: Optional[ExecutionPlan] = None
     report_sections: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)  # report_key -> sections
     section_contents: Dict[str, Dict[str, str]] = Field(default_factory=dict)  # report_key -> {section_title -> content}
@@ -115,6 +116,8 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             log(f"🔖 토픽: {self.state.topic}")
             log(f"👥 유저 정보:\n{json.dumps(self.state.user_info, indent=2, ensure_ascii=False)}")
             log(f"📑 폼 타입:\n{json.dumps(self.state.form_types, indent=2, ensure_ascii=False)}")
+            if self.state.form_html:
+                log(f"🧩 폼 HTML 길이: {len(self.state.form_html)}")
 
             # 추가: 실행 계획 상세 로그
             log(f"🗒️ 실행 계획 상세:\n{json.dumps(plan_data, indent=2, ensure_ascii=False)}")
@@ -502,7 +505,8 @@ class PromptMultiFormatFlow(Flow[MultiFormatState]):
             self.state.user_info,
             api_key,
             previous_outputs_summary=self.state.previous_outputs,
-            feedback_summary=self.state.previous_feedback
+            feedback_summary=self.state.previous_feedback,
+            form_html=self.state.form_html
         )
         
         await self._parse_all_text_results(result_text)
